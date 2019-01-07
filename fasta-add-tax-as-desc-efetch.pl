@@ -7,25 +7,52 @@ use Getopt::Long;
 my $usage;
 $usage  = "perl fasta-add-tax-as-desc-efetch.pl [OPTIONS] <fasta file (cannot be read from stdin)>\n";
 $usage .= "\tOPTIONS:\n";
+$usage .= "\t\t--name <s>:  add taxonomy string tokens <d1> to <d2> to the sequence name (<s>=<d1>-<d2>, or 'all' for all) [default: replace current desc with tax string]\n";
 $usage .= "\t\t--prepend:   add taxonomy string at beginning of existing seq description [default: replace current desc with tax string]\n";
 $usage .= "\t\t--append:    add taxonomy string at end       of existing seq description [default: replace current desc with tax string]\n";
 $usage .= "\t\t--unknownok: output UNKNOWN-TAXONOMY (instead of failing) if taxonomy of a seq is unknown because it is not in nuccore (wgs, maybe?)\n";
 
+my $opt_name      = undef;
 my $opt_prepend   = undef;
 my $opt_append    = undef;
 my $opt_unknownok = undef;
-&GetOptions( "prepend"   => \$opt_prepend, 
+&GetOptions( "name=s"    => \$opt_name,
+             "prepend"   => \$opt_prepend, 
              "append"    => \$opt_append,
              "unknownok" => \$opt_unknownok);
 
+my $do_name    = 0;
 my $do_prepend = 0;
 my $do_append = 0;
 my $do_unknownok = 0;
-if(defined $opt_prepend)   { $do_prepend = 1; }
-if(defined $opt_append)    { $do_append = 1; }
+if(defined $opt_name)      { $do_name      = 1; }
+if(defined $opt_prepend)   { $do_prepend   = 1; }
+if(defined $opt_append)    { $do_append    = 1; }
 if(defined $opt_unknownok) { $do_unknownok = 1; }
 
-if($do_prepend && $do_append) { die "ERROR choose one of --prepend or --append"; }
+if($do_name    && $do_append)  { die "ERROR choose one of --name or --append"; }
+if($do_name    && $do_prepend) { die "ERROR choose one of --name or --prepend"; }
+if($do_prepend && $do_append)  { die "ERROR choose one of --prepend or --append"; }
+
+my $name_d1 = undef;
+my $name_d2 = undef;
+my $name_all = 0;
+if(defined $opt_name) { 
+  if($opt_name eq "all") { 
+    $name_all = 1;
+  }
+  else { 
+    if($opt_name =~ /^(\d+)\-(\d+)$/) {
+      ($name_d1, $name_d2) = ($1, $2);
+      if($name_d1 >= $name_d2) { 
+        die "ERROR with --name <s>, <s> must equal \"<d1>-<d2>\" with <d1> <= <d2>";
+      }
+    }
+    else { 
+      die "ERROR with --name <s>, <s> must equal \"all\" or \"<d1>-<d2>\" with <d1> <= <d2>";
+    }
+  }
+}
 
 if(scalar(@ARGV) != 1) { die $usage; }
 my ($fasta_file) = (@ARGV);
@@ -112,11 +139,32 @@ while($line = <FASTA>) {
           die "ERROR, no tax info for sequence $orig_seqname ($acc), use --unknownok to allow this";
         }
       }
-      print ">" . $orig_seqname . " ";
-      if($do_append) { print $orig_seqdesc . ";;"; }
-      print $cur_tax; 
-      if($do_prepend) { print ";;" . $orig_seqdesc; }
-      print "\n";
+      if($do_name) { 
+        # create new name from tax string 
+        my $new_name = $orig_seqname . ";"; 
+        my $tax_str = "";
+        if($name_all) { 
+          $tax_str = $cur_tax;
+        }
+        else { 
+          my @tax_A = split("; ", $cur_tax); 
+          my $tax_start = $name_d1;
+          my $tax_stop  = $name_d2;
+          if($tax_stop > (scalar(@tax_A))) { $tax_stop = scalar(@tax_A); }
+          for(my $t = ($tax_start-1); $t <= ($tax_stop-1); $t++) { 
+            $new_name .= $tax_A[$t] . ";";
+          }
+        }
+        print ">" . $new_name . "\n";
+      }
+      else { 
+        # modify desc with tax string
+        print ">" . $orig_seqname . " ";
+        if($do_append) { print $orig_seqdesc . ";;"; }
+        print $cur_tax; 
+        if($do_prepend) { print ";;" . $orig_seqdesc; }
+        print "\n";
+      }
     }
     else { 
       die "ERROR unable to parse fasta header line $line";
