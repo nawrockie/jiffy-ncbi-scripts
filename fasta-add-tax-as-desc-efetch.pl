@@ -66,11 +66,16 @@ my $seqstat_file = $fasta_file . ".a.seqstat";
 my $seqstat_cmd = "esl-seqstat -a $fasta_file > $seqstat_file";
 run_command($seqstat_cmd, $be_verbose);
 
-# parse seqstat file to get list of sequence names
+# read list file
+my @seqname_list_str_A = ();
 my $seqname_list_str = "";
+my $list_size = 0;
+my $block_size = 100;
+my $max_width = 0;
 open(SEQSTAT, $seqstat_file) || die "ERROR unable to open $seqstat_file for reading";
 my $line;
 while($line = <SEQSTAT>) { 
+  chomp $line;
   if($line =~ /^\=\s+(\S+)/) { 
     my $orig_seqname = $1;
     my $acc = undef;
@@ -85,14 +90,30 @@ while($line = <SEQSTAT>) {
     }
     if($seqname_list_str ne "") { $seqname_list_str .= ","; }
     $seqname_list_str .= $acc;
+    $list_size++;
+    if($list_size == $block_size) { 
+      push(@seqname_list_str_A, $seqname_list_str);
+      $seqname_list_str = "";
+      $list_size = 0;
+    }
   }
 }
 close(SEQSTAT);
+if($list_size > 0) { 
+    push(@seqname_list_str_A, $seqname_list_str);
+}  
 
 # run efetch to get tax strings
 my $tax_file = $fasta_file . ".tax";
-my $eutils_cmd = "esearch -db nuccore -query \"$seqname_list_str\" | efetch -format gpc | xtract -insd INSDSeq_taxonomy > $tax_file";
-run_command($eutils_cmd, $be_verbose);
+
+my $nlists = scalar(@seqname_list_str_A);
+
+my $eutils_cmd = "";
+if(-e $tax_file) { unlink $tax_file; }
+foreach $seqname_list_str (@seqname_list_str_A) { 
+  $eutils_cmd = "esearch -db nuccore -query \"$seqname_list_str\" | efetch -format gpc | xtract -insd INSDSeq_taxonomy >> $tax_file";
+  run_command($eutils_cmd, $be_verbose);
+}
 
 # parse efetch output
 open(TAX, $tax_file) || die "ERROR unable to open $tax_file for reading";

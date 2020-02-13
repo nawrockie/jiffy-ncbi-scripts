@@ -7,10 +7,15 @@ use Getopt::Long;
 my $usage;
 $usage  = "perl list-get-tax-efetch.pl [OPTIONS] <file with list of sequences>\n";
 $usage .= "\tOPTIONS:\n";
+$usage .= "\t\t-v:          be verbose, output commands as they are run\n";
 $usage .= "\t\t--unknownok: output UNKNOWN-TAXONOMY (instead of failing) if taxonomy of a seq is unknown because it is not in nuccore (wgs, maybe?)\n";
 
 my $opt_unknownok = undef;
-&GetOptions("unknownok" => \$opt_unknownok);
+my $be_verbose = 0;
+&GetOptions(
+  "v"         => \$be_verbose,
+  "unknownok" => \$opt_unknownok, 
+    );
 
 my $do_unknownok = 0;
 if(defined $opt_unknownok) { $do_unknownok = 1; }
@@ -20,10 +25,12 @@ my ($list_file) = (@ARGV);
 
 if(! -s $list_file) { die "ERROR fasta file $list_file does not exist or is empty"; }
 
-my $be_verbose = 0;
 
 # read list file
+my @seqname_list_str_A = ();
 my $seqname_list_str = "";
+my $list_size = 0;
+my $block_size = 100;
 my $max_width = 0;
 open(LIST, $list_file) || die "ERROR unable to open $list_file for reading";
 my $line;
@@ -43,13 +50,29 @@ while($line = <LIST>) {
   }
   if($seqname_list_str ne "") { $seqname_list_str .= ","; }
   $seqname_list_str .= $acc;
+  $list_size++;
+  if($list_size == $block_size) { 
+    push(@seqname_list_str_A, $seqname_list_str);
+    $seqname_list_str = "";
+    $list_size = 0;
+  }
 }
 close(LIST);
+if($list_size > 0) { 
+    push(@seqname_list_str_A, $seqname_list_str);
+}  
 
 # run efetch to get tax strings
 my $tax_file = $list_file . ".tax";
-my $eutils_cmd = "esearch -db nuccore -query \"$seqname_list_str\" | efetch -format gpc | xtract -insd INSDSeq_taxonomy > $tax_file";
-run_command($eutils_cmd, $be_verbose);
+
+my $nlists = scalar(@seqname_list_str_A);
+
+my $eutils_cmd = "";
+if(-e $tax_file) { unlink $tax_file; }
+foreach $seqname_list_str (@seqname_list_str_A) { 
+  $eutils_cmd = "esearch -db nuccore -query \"$seqname_list_str\" | efetch -format gpc | xtract -insd INSDSeq_taxonomy >> $tax_file";
+  run_command($eutils_cmd, $be_verbose);
+}
 
 # parse efetch output
 open(TAX, $tax_file) || die "ERROR unable to open $tax_file for reading";
